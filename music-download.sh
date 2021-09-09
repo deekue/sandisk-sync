@@ -13,7 +13,7 @@ PlayerVoiceDir="${PlayerDir}/Record"
 FileTemplate="%(id)s.%(ext)s"
 SyncDir="$(dirname -- "$0")/sync"
 SyncMusicDir="${SyncDir}/Music"
-VoiceMusicDir="${VoiceDir}/Music"
+SyncVoiceDir="${SyncDir}/Record"
 
 # TODO pull playlist ids from a file or cmdline
 PLAYLIST_IDS=(
@@ -70,12 +70,13 @@ function playlist_yt_m3u {
     echo
     $YTBin -j "$playlist_url" \
       | tee "${playlist_json}" \
-      | jq -rs '["#EXTPLAYLIST: ", .[0].playlist_title] | add'
+      | jq -rs '["#PLAYLIST: ", .[0].playlist_title] | add'
     cat "${playlist_json}" \
      | jq -rs '.[] | [ "#EXTINF:", (.duration|tostring), " ", .uploader, " - ", .title, "\n", .id, ".mp3"] | add' 
   ) \
     | sed 's/$/\r/' \
-    > "$m3u_file"
+    > "${m3u_file}.temp"
+  mv "${m3u_file}.temp" "${m3u_file}"
 }
 
 function sync_to_player {
