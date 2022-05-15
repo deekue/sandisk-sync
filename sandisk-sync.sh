@@ -5,15 +5,17 @@
 set -eEuo pipefail
 
 # TODO fix album art
+# TODO add args
 
 YTBin="youtube-dl"
 PlayerDir="/media/$USER/SPORT GO"
 PlayerMusicDir="${PlayerDir}/Music"
 PlayerVoiceDir="${PlayerDir}/Record"
 FileTemplate="%(id)s.%(ext)s"
-SyncDir="$(dirname -- "$0")/sync"
+SyncDir="$HOME/.cache/sandisk-sync"
 SyncMusicDir="${SyncDir}/Music"
-SyncVoiceDir="${SyncDir}/Record"
+SyncVoiceDir="$HOME/Record"
+YTCookieJar="${SyncDir}/cookiejar"
 
 # TODO pull playlist ids from a file or cmdline
 PLAYLIST_IDS=(
@@ -48,7 +50,7 @@ function download_playlist {
     --no-overwrites \
     --output-na-placeholder '_' \
     --download-archive "$playlist_outdir/archive.txt" \
-    --cookies "$HOME/.cache/$(basename -- "$0").cookiejar" \
+    --cookies "$YTCookieJar" \
     --no-call-home \
     --yes-playlist \
     --postprocessor-args '-id3v2_version 3' \
@@ -65,6 +67,7 @@ function playlist_yt_m3u {
   local -r playlist_json="$SyncDir/${playlist_id}.json"
 
   # convert the broken JSON to an .m3u file, with DOS line endings
+  echo -n "Generating playlist ${m3u_file}..."
   (
     echo "#EXTM3U"
     echo
@@ -76,15 +79,21 @@ function playlist_yt_m3u {
   ) \
     | sed 's/$/\r/' \
     > "${m3u_file}.temp"
-  mv "${m3u_file}.temp" "${m3u_file}"
+  if ! diff -q "${m3u_file}.temp" "${m3u_file}" > /dev/null ; then
+    echo -n "updated..."
+    mv "${m3u_file}.temp" "${m3u_file}"
+  fi
+  echo "done."
 }
 
 function sync_to_player {
   if [[ ! -d "$PlayerMusicDir" ]] ; then
-    echo "Error: $PlayerMusicDir not found" >&2
+    echo "ERROR: player music dir $PlayerMusicDir not found" >&2
     exit 1
   fi
   rsync -Paxm \
+    --update \
+    --modify-window 2 \
     --delete \
     --include '*.mp3' \
     --include '*.m3u' \
