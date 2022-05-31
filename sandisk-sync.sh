@@ -5,9 +5,15 @@
 set -eEuo pipefail
 
 # TODO fix album art
-# TODO add args
 
-YTBin="youtube-dl"
+# Commandline args
+ConfigFile="$HOME/.config/sandisk-sync"
+DownloadFiles=1
+SyncFiles=1
+SyncVoice=1
+
+# internal vars
+YTBin="$(which youtube-dl)"
 PlayerDir="/media/$USER/SPORT GO"
 PlayerMusicDir="${PlayerDir}/Music"
 PlayerVoiceDir="${PlayerDir}/Record"
@@ -16,12 +22,7 @@ SyncDir="$HOME/.cache/sandisk-sync"
 SyncMusicDir="${SyncDir}/Music"
 SyncVoiceDir="$HOME/Record"
 YTCookieJar="${SyncDir}/cookiejar"
-
-# TODO pull playlist ids from a file or cmdline
-PLAYLIST_IDS=(
-  PLnL5AoJtd7kaJEDFJs_goCrWuRj7-hDmt
-  PLwwTwi_1421AVa0oQdXkfMuonJ0ovMfqX
-  )
+PlaylistIds=()
 
 function playlist_id_to_url {
   local -r playlist_id="${1:?arg1 is playlist id}"
@@ -105,9 +106,51 @@ function sync_voice_recordings_from_player {
   rsync -Pax "$PlayerVoiceDir/" "$SyncVoiceDir/"
 }
 
+function usage {
+  cat <<EOF >&2
+Usage: $(basename -- "$0") [options] [YT playlist ID]
+
+-c file    config file ($ConfigFile)
+-d         toggle download new files ($DownloadFiles)
+-h         help
+-p dir     dir Sandisk player is mounted ($PlayerDir)
+-r         toggle sync Voice Recordings from player ($SyncVoice)
+-s         toggle sync new files to player ($SyncFiles)
+
+EOF
+  exit 1
+}
+
 # Main
-for playlist_id in ${PLAYLIST_IDS[@]} ; do
-  download_playlist "$playlist_id"
+OPTIND=1
+while getopts "c:dhp:rs" arg; do
+	case $arg in
+    c) ConfigFile="${OPTARG:-}";;
+    d) ((DownloadFiles=(DownloadFiles==1)?0:1)) || true;;
+    h) usage;;
+    p) PlayerDir="${OPTARG:-}";;
+    r) ((SyncVoice=(SyncVoice==1)?0:1)) || true;;
+    s) ((SyncFiles=(SyncFiles==1)?0:1)) || true;;
+  esac
 done
-sync_to_player
-sync_voice_recordings_from_player
+shift $(( OPTIND - 1 )) # remove processed options
+
+if [[ "${#@}" -ge 1 ]] ; then
+  PlaylistIds=("$@")
+elif [[ -r "$ConfigFile" ]] ; then
+  source "$ConfigFile"
+fi
+echo "${PlaylistIds[@]}"
+
+if [[ "$DownloadFiles" -eq 1 ]] ; then
+  for playlist_id in ${PlaylistIds[@]} ; do
+    download_playlist "$playlist_id"
+  done
+fi
+if [[ "$SyncFiles" -eq 1 ]] ; then
+  sync_to_player
+fi
+if [[ "$SyncVoice" -eq 1 ]] ; then
+  sync_voice_recordings_from_player
+fi
+
