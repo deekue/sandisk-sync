@@ -23,6 +23,9 @@ SyncMusicDir="${SyncDir}/Music"
 SyncVoiceDir="$HOME/Record"
 YTCookieJar="${SyncDir}/cookiejar"
 PlaylistIds=()
+AlbumArtScaleFilter="400:400" # fixed size, ignore aspect ratio
+#AlbumArtScaleFilter="400:-1" # fixed width, respect aspect ratio
+
 
 function playlist_id_to_url {
   local -r playlist_id="${1:?arg1 is playlist id}"
@@ -58,6 +61,7 @@ function download_playlist {
   "$playlist_url"
 
   playlist_yt_m3u "${playlist_id}" "${playlist_outdir}/${playlist_id}.m3u"
+  scale_album_art "${playlist_outdir}"
 }
 
 function playlist_yt_m3u {
@@ -104,6 +108,36 @@ function sync_to_player {
 
 function sync_voice_recordings_from_player {
   rsync -Pax "$PlayerVoiceDir/" "$SyncVoiceDir/"
+}
+
+function scale_album_art {
+  local -r baseDir="${1:?arg1 is base dir}"
+  local stamp
+
+  find "$baseDir" -type f -name '*.mp3'  \
+    | while read file ; do \
+        stamp="${file}.scaled"
+        if [[ ! -r "${stamp}" ]] ; then
+          echo "scaling album art for $file"
+          ffmpeg \
+             -y \
+             -loglevel error \
+             -hide_banner \
+             -i "$file" \
+             -map 0:a:0 -map 0:v:0 \
+             -filter:v scale="${AlbumArtScaleFilter}" \
+             -c:v mjpeg -c:a copy \
+             -id3v2_version 3 \
+             "${file%.mp3}_scaled.mp3" \
+          && mv -v "${file%.mp3}_scaled.mp3" "$file" \
+          && touch "${stamp}"
+        fi
+      done
+}
+
+function extractAlbumArt {
+  local -r mp3File="${1:?arg1 is }"
+  ffmpeg -i "$1" -an -vcodec copy "${1%.mp3}.jpg"
 }
 
 function usage {
