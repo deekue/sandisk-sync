@@ -1,6 +1,6 @@
 # Sandisk MP3 Player YouTube Sync
 
-sync a YT playlist to local mp3 files and generate a Sandisk compatible m3u file
+sync a YT playlist to a Sandisk MP3 player.  
 
 tested with a 'Sandisk Clip Sport Go' aka SDMX30 
 
