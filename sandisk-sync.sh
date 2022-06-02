@@ -4,8 +4,6 @@
 
 set -eEuo pipefail
 
-# TODO fix album art
-
 # Commandline args
 ConfigFile="$HOME/.config/sandisk-sync"
 DownloadFiles=1
@@ -14,6 +12,7 @@ SyncVoice=1
 
 # internal vars
 YTBin="$(which youtube-dl)"
+FfmpegBin="$(which ffmpeg)"
 PlayerDir="/media/$USER/SPORT GO"
 PlayerMusicDir="${PlayerDir}/Music"
 PlayerVoiceDir="${PlayerDir}/Record"
@@ -71,6 +70,11 @@ function playlist_yt_m3u {
   local -r playlist_url="$(playlist_id_to_url "${playlist_id}")"
   local -r playlist_json="$SyncDir/${playlist_id}.json"
 
+  if [[ -z "$(which jq)" ]] ; then
+    echo "jq not found, skipping generating playlist" >&2
+    return
+  fi
+
   # convert the broken JSON to an .m3u file, with DOS line endings
   echo -n "Generating playlist ${m3u_file}..."
   (
@@ -114,12 +118,17 @@ function scale_album_art {
   local -r baseDir="${1:?arg1 is base dir}"
   local stamp
 
+  if [[ -z "${FfmpegBin}" ]] ; then
+    echo "ffmpeg not found, skipping resizing album art" >&2
+    return
+  fi
+
   find "$baseDir" -type f -name '*.mp3'  \
     | while read file ; do \
         stamp="${file}.scaled"
         if [[ ! -r "${stamp}" ]] ; then
           echo "scaling album art for $file"
-          ffmpeg \
+          "${FfmpegBin}" \
              -y \
              -loglevel error \
              -hide_banner \
@@ -137,7 +146,7 @@ function scale_album_art {
 
 function extractAlbumArt {
   local -r mp3File="${1:?arg1 is }"
-  ffmpeg -i "$1" -an -vcodec copy "${1%.mp3}.jpg"
+  "${FfmpegBin}" -i "$1" -an -vcodec copy "${1%.mp3}.jpg"
 }
 
 function usage {
