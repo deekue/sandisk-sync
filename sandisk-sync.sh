@@ -7,13 +7,16 @@ set -eEuo pipefail
 # Commandline args
 ConfigFile="$HOME/.config/sandisk-sync"
 DownloadFiles=1
+GeneratePlaylist=1
 SyncFiles=1
 SyncVoice=1
+UmountAfter=0
 
 # internal vars
-YTBin="$(which youtube-dl)"
+YTBin="$HOME/.local/bin/youtube-dl"
 FfmpegBin="$(which ffmpeg)"
-PlayerDir="/media/$USER/SPORT GO"
+PlayerName="SPORT GO"
+PlayerDir="/media/$USER/$PlayerName"
 PlayerMusicDir="${PlayerDir}/Music"
 PlayerVoiceDir="${PlayerDir}/Record"
 FileTemplate="%(id)s.%(ext)s"
@@ -59,7 +62,6 @@ function download_playlist {
     --postprocessor-args '-id3v2_version 3' \
   "$playlist_url"
 
-  playlist_yt_m3u "${playlist_id}" "${playlist_outdir}/${playlist_id}.m3u"
   scale_album_art "${playlist_outdir}"
 }
 
@@ -74,6 +76,10 @@ function playlist_yt_m3u {
     echo "jq not found, skipping generating playlist" >&2
     return
   fi
+
+  # TODO check if we have downloaded new files before processing playlist
+  # find "$SyncMusicDir" -type f -name '*.mp3' -newer "$m3u_file"
+
 
   # convert the broken JSON to an .m3u file, with DOS line endings
   echo -n "Generating playlist ${m3u_file}..."
@@ -114,9 +120,30 @@ function sync_voice_recordings_from_player {
   rsync -Pax "$PlayerVoiceDir/" "$SyncVoiceDir/"
 }
 
+function ffmpeg_scale_album_art {
+  local -r src="${1:?arg1 is source}"
+  local -r dst="${2:?arg2 is destination}"
+
+  # FIXME ffmpeg is not returning an error code when it fails
+  if [[ ! -r "$src" ]] ; then
+    echo "ERROR: $src not found" >&2
+    return 1
+  fi
+#     -loglevel error \
+  "${FfmpegBin}" \
+     -y \
+     -hide_banner \
+     -i "$src" \
+     -map 0:a:0 -map 0:v:0 \
+     -filter:v scale="${AlbumArtScaleFilter}" \
+     -c:v mjpeg -c:a copy \
+     -id3v2_version 3 \
+     "$dst"
+}
+
 function scale_album_art {
   local -r baseDir="${1:?arg1 is base dir}"
-  local stamp
+  local stamp scaled
 
   if [[ -z "${FfmpegBin}" ]] ; then
     echo "ffmpeg not found, skipping resizing album art" >&2
@@ -124,29 +151,34 @@ function scale_album_art {
   fi
 
   find "$baseDir" -type f -name '*.mp3'  \
-    | while read file ; do \
+    | while read -r file ; do \
         stamp="${file}.scaled"
+        scaled="${file%.mp3}_scaled.mp3"
         if [[ ! -r "${stamp}" ]] ; then
           echo "scaling album art for $file"
-          "${FfmpegBin}" \
-             -y \
-             -loglevel error \
-             -hide_banner \
-             -i "$file" \
-             -map 0:a:0 -map 0:v:0 \
-             -filter:v scale="${AlbumArtScaleFilter}" \
-             -c:v mjpeg -c:a copy \
-             -id3v2_version 3 \
-             "${file%.mp3}_scaled.mp3" \
-          && mv -v "${file%.mp3}_scaled.mp3" "$file" \
-          && touch "${stamp}"
+          if ffmpeg_scale_album_art "$file" "$scaled" ; then
+            if [[ -r "$scaled" ]] ; then
+              mv -v "$scaled" "$file" \
+                && touch "${stamp}"
+            fi
+          fi
         fi
       done
 }
 
 function extractAlbumArt {
-  local -r mp3File="${1:?arg1 is }"
-  "${FfmpegBin}" -i "$1" -an -vcodec copy "${1%.mp3}.jpg"
+  local -r mp3File="${1:?arg1 is mp3 file}"
+  "${FfmpegBin}" -i "$mp3File" -an -vcodec copy "${mp3File%.mp3}.jpg"
+}
+
+function umount_after_sync {
+  local -r device="$(mount | sed -ne "/$PlayerName"'/ s/^\([^ ]*\) .*$/\1/p')"
+
+  if [[ -n "$device" && -b "$device" ]] ; then
+    udisksctl unmount -b "$device"
+  else
+    echo "ERROR: failed to unmount $PlayerDir" >&2
+  fi
 }
 
 function usage {
@@ -155,10 +187,12 @@ Usage: $(basename -- "$0") [options] [YT playlist ID]
 
 -c file    config file ($ConfigFile)
 -d         toggle download new files ($DownloadFiles)
+-g         toggle generating device playlist ($GeneratePlaylist)
 -h         help
 -p dir     dir Sandisk player is mounted ($PlayerDir)
 -r         toggle sync Voice Recordings from player ($SyncVoice)
 -s         toggle sync new files to player ($SyncFiles)
+-u         toggle unmount after sync ($UmountAfter)
 
 EOF
   exit 1
@@ -166,14 +200,17 @@ EOF
 
 # Main
 OPTIND=1
-while getopts "c:dhp:rs" arg; do
+while getopts "c:dghp:rsu" arg; do
 	case $arg in
     c) ConfigFile="${OPTARG:-}";;
     d) ((DownloadFiles=(DownloadFiles==1)?0:1)) || true;;
+    g) ((GeneratePlaylist=(GeneratePlaylist==1)?0:1)) || true;;
     h) usage;;
     p) PlayerDir="${OPTARG:-}";;
     r) ((SyncVoice=(SyncVoice==1)?0:1)) || true;;
     s) ((SyncFiles=(SyncFiles==1)?0:1)) || true;;
+    u) ((UmountAfter=(UmountAfter==1)?0:1)) || true;;
+    *) usage ;;
   esac
 done
 shift $(( OPTIND - 1 )) # remove processed options
@@ -186,8 +223,11 @@ fi
 echo "${PlaylistIds[@]}"
 
 if [[ "$DownloadFiles" -eq 1 ]] ; then
-  for playlist_id in ${PlaylistIds[@]} ; do
+  for playlist_id in "${PlaylistIds[@]}" ; do
     download_playlist "$playlist_id"
+    if [[ "$GeneratePlaylist" -eq 1 ]] ; then
+      playlist_yt_m3u "${playlist_id}" "$SyncMusicDir/$playlist_id/${playlist_id}.m3u"
+    fi
   done
 fi
 if [[ "$SyncFiles" -eq 1 ]] ; then
@@ -197,3 +237,6 @@ if [[ "$SyncVoice" -eq 1 ]] ; then
   sync_voice_recordings_from_player
 fi
 
+if [[ "$UmountAfter" -eq 1 ]] ; then
+  umount_after_sync
+fi
