@@ -13,12 +13,10 @@ SyncVoice=1
 UmountAfter=0
 
 # internal vars
-YTBin="$HOME/.local/bin/youtube-dl"
+YTBin="$HOME/.local/bin/yt-dlp"
 FfmpegBin="$(which ffmpeg)"
 PlayerName="SPORT GO"
 PlayerDir="/media/$USER/$PlayerName"
-PlayerMusicDir="${PlayerDir}/Music"
-PlayerVoiceDir="${PlayerDir}/Record"
 FileTemplate="%(id)s.%(ext)s"
 SyncDir="$HOME/.cache/sandisk-sync"
 SyncMusicDir="${SyncDir}/Music"
@@ -80,7 +78,6 @@ function playlist_yt_m3u {
   # TODO check if we have downloaded new files before processing playlist
   # find "$SyncMusicDir" -type f -name '*.mp3' -newer "$m3u_file"
 
-
   # convert the broken JSON to an .m3u file, with DOS line endings
   echo -n "Generating playlist ${m3u_file}..."
   (
@@ -89,8 +86,8 @@ function playlist_yt_m3u {
     $YTBin -j "$playlist_url" \
       | tee "${playlist_json}" \
       | jq -rs '["#PLAYLIST: ", .[0].playlist_title] | add'
-    cat "${playlist_json}" \
-     | jq -rs '.[] | [ "#EXTINF:", (.duration|tostring), " ", .uploader, " - ", .title, "\n", .id, ".mp3"] | add' 
+    jq -rs '.[] | [ "#EXTINF:", (.duration|tostring), " ", .uploader, " - ", .title, "\n", .id, ".mp3"] | add' \
+      < "${playlist_json}"
   ) \
     | sed 's/$/\r/' \
     > "${m3u_file}.temp"
@@ -121,7 +118,7 @@ function sync_voice_recordings_from_player {
 }
 
 function ffmpeg_scale_album_art {
-  local -r src="${1:?arg1 is source}"
+  local -r src="/${1:?arg1 is source}"
   local -r dst="${2:?arg2 is destination}"
 
   # FIXME ffmpeg is not returning an error code when it fails
@@ -215,9 +212,13 @@ while getopts "c:dghp:rsu" arg; do
 done
 shift $(( OPTIND - 1 )) # remove processed options
 
+PlayerMusicDir="${PlayerDir}/Music"
+PlayerVoiceDir="${PlayerDir}/Record"
+
 if [[ "${#@}" -ge 1 ]] ; then
   PlaylistIds=("$@")
 elif [[ -r "$ConfigFile" ]] ; then
+  # shellcheck source=sandisk-sync.config-example
   source "$ConfigFile"
 fi
 echo "${PlaylistIds[@]}"
